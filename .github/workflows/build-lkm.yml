@@ -1,0 +1,77 @@
+name: Build MilkSU LKM
+
+on:
+  workflow_dispatch:
+    inputs:
+      kmi_scope:
+        description: KMI to build
+        type: choice
+        default: android14-6.1
+        options:
+          - android14-6.1
+          - all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: milksu-lkm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  lkm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      MILKSU_CACHE: /opt/milksu
+      MILKSU_JOBS: 2
+      MILKSU_DDK_RELEASE: '20260828'
+      MILKSU_SIGNING_PROFILE: development
+      MILKSU_REQUIRE_RELEASE_SIGNING: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check build scripts
+        shell: bash
+        run: |
+          for script in tools/build-*.sh tools/bootstrap-*.sh; do
+            bash -n "$script"
+          done
+
+      - name: Prepare pinned Linux tools
+        shell: bash
+        run: |
+          sudo env MILKSU_ROOT="$GITHUB_WORKSPACE" MILKSU_CACHE="$MILKSU_CACHE" bash tools/bootstrap-milksu.sh all
+          sudo env MILKSU_ROOT="$GITHUB_WORKSPACE" MILKSU_CACHE="$MILKSU_CACHE" bash tools/bootstrap-kpatch-toolchain.sh
+
+      - name: Build ARM64 LKM (kernelsu + susfs guard)
+        shell: bash
+        run: |
+          sudo --preserve-env=MILKSU_SIGNING_PROFILE,MILKSU_REQUIRE_RELEASE_SIGNING env MILKSU_ROOT="$GITHUB_WORKSPACE" MILKSU_CACHE="$MILKSU_CACHE" bash tools/build-lkm.sh android14-6.1 both
+
+      - name: List built modules
+        if: always()
+        shell: bash
+        run: |
+          echo "--- out/aarch64 ---"
+          ls -la out/aarch64/ || true
+          echo "--- all .ko ---"
+          find out -name '*.ko' -printf '%p %s bytes\n' || true
+
+      - name: Upload LKM
+        uses: actions/upload-artifact@v7
+        with:
+          name: MilkSU-lkm-android14-6.1
+          path: |
+            out/aarch64/*.ko
+          if-no-files-found: error
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: MilkSU-lkm-logs
+          path: out/build-logs/
+          if-no-files-found: ignore
