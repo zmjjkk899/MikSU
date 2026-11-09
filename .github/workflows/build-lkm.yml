@@ -1,4 +1,4 @@
-name: Build MilkSU LKM
+name: Build MilkSU LKM + KPatch
 
 on:
   workflow_dispatch:
@@ -15,13 +15,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: milksu-lkm-${{ github.ref }}
+  group: milksu-lkm-kpatch-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  lkm:
+  build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 180
     env:
       MILKSU_CACHE: /opt/milksu
       MILKSU_JOBS: 2
@@ -51,15 +51,6 @@ jobs:
         run: |
           sudo --preserve-env=MILKSU_SIGNING_PROFILE,MILKSU_REQUIRE_RELEASE_SIGNING env MILKSU_ROOT="$GITHUB_WORKSPACE" MILKSU_CACHE="$MILKSU_CACHE" bash tools/build-lkm.sh android14-6.1 both
 
-      - name: List built modules
-        if: always()
-        shell: bash
-        run: |
-          echo "--- out/aarch64 ---"
-          ls -la out/aarch64/ || true
-          echo "--- all .ko ---"
-          find out -name '*.ko' -printf '%p %s bytes\n' || true
-
       - name: Upload LKM
         uses: actions/upload-artifact@v7
         with:
@@ -68,10 +59,33 @@ jobs:
             out/aarch64/*.ko
           if-no-files-found: error
 
+      - name: Build KPatch (kpimg + kptools)
+        shell: bash
+        run: |
+          sudo --preserve-env=MILKSU_SIGNING_PROFILE,MILKSU_REQUIRE_RELEASE_SIGNING env MILKSU_ROOT="$GITHUB_WORKSPACE" MILKSU_CACHE="$MILKSU_CACHE" bash tools/build-kpatch.sh
+
+      - name: Upload KPatch
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: MilkSU-kpatch-aarch64
+          path: |
+            out/kpatch/aarch64/**
+            out/tools/kptools
+            out/manifests/kpatch-loader-relocations.json
+          if-no-files-found: warn
+
+      - name: List everything built
+        if: always()
+        shell: bash
+        run: |
+          echo "--- out ---"
+          find out -maxdepth 3 -type f -printf '%p %s\n' 2>/dev/null | sort || true
+
       - name: Upload build logs
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: MilkSU-lkm-logs
+          name: MilkSU-lkm-kpatch-logs
           path: out/build-logs/
           if-no-files-found: ignore
