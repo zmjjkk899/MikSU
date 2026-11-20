@@ -31,7 +31,14 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
         ksu_set_task_tracepoint_flag(current);
         spin_unlock_irq(&current->sighand->siglock);
 
-        ksu_install_fd();
+        /*
+         * This runs from the setresuid sys_enter tracepoint hook, i.e. with
+         * preemption disabled. ksu_install_fd() allocates with GFP_KERNEL and
+         * calls anon_inode_getfile(), both of which may sleep - doing that
+         * here triggers "scheduling while atomic" and hangs the manager on a
+         * second start. Defer the install to task_work instead.
+         */
+        ksu_install_fd_async();
         return 0;
     }
 
