@@ -72,6 +72,28 @@ struct umount_tw {
     struct callback_head cb;
 };
 
+/*
+ * The actual unmount work. It must not run directly inside ksu_handle_umount():
+ * that function is reached from the setresuid sys_enter tracepoint hook, where
+ * preemption is disabled and path_umount()/kern_path() may sleep.
+ */
+static void ksu_umount_tw_func(struct callback_head *cb)
+{
+    struct umount_tw *tw = container_of(cb, struct umount_tw, cb);
+    const struct cred *saved = override_creds(ksu_cred);
+    struct mount_entry *entry;
+
+    down_read(&mount_list_lock);
+    list_for_each_entry (entry, &mount_list, list) {
+        pr_info("%s: unmounting: %s flags: 0x%x\n", __func__, entry->umountable, entry->flags);
+        try_umount(entry->umountable, entry->flags);
+    }
+    up_read(&mount_list_lock);
+
+    revert_creds(saved);
+    kfree(tw);
+}
+
 int ksu_handle_umount(uid_t old_uid, uid_t new_uid)
 {
     // if there isn't any module mounted, just ignore it!
@@ -110,17 +132,17 @@ int ksu_handle_umount(uid_t old_uid, uid_t new_uid)
     // umount the target mnt
     pr_info("handle umount for uid: %d, pid: %d\n", new_uid, current->pid);
 
-    const struct cred *saved = override_creds(ksu_cred);
-
-    struct mount_entry *entry;
-    down_read(&mount_list_lock);
-    list_for_each_entry (entry, &mount_list, list) {
-        pr_info("%s: unmounting: %s flags: 0x%x\n", __func__, entry->umountable, entry->flags);
-        try_umount(entry->umountable, entry->flags);
+    struct umount_tw *tw = kzalloc(sizeof(*tw), GFP_ATOMIC);
+    if (!tw) {
+        pr_warn("handle umount: task_work alloc failed\n");
+        return -ENOMEM;
     }
-    up_read(&mount_list_lock);
-
-    revert_creds(saved);
+    tw->cb.func = ksu_umount_tw_func;
+    if (task_work_add(current, &tw->cb, TWA_RESUME)) {
+        kfree(tw);
+        pr_warn("handle umount: task_work_add failed\n");
+        return -EAGAIN;
+    }
 
     return 0;
 }
