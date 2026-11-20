@@ -72,16 +72,37 @@ printf "DDK KDIR=%s ARCH=%s\n" "$KDIR" "$ARCH"
 # resolve kernel symbols at runtime through kallsyms_lookup_name and ship an
 # empty __versions section, so overriding the two vermagic strings is enough.
 if [[ -n "${MILKSU_KMOD_UTS_RELEASE:-}" ]]; then
+    # modpost takes vermagic from UTS_RELEASE, which lives in
+    # include/generated/utsrelease.h. include/config/kernel.release only caches
+    # the output of `make kernelrelease` and is rewritten during the build, so
+    # writing it alone changes nothing in the produced .ko.
     printf "%s" "$MILKSU_KMOD_UTS_RELEASE" > "$KDIR/include/config/kernel.release"
-    printf "vermagic: UTS_RELEASE    -> %s\n" "$(cat "$KDIR/include/config/kernel.release")"
+    uts_h="$KDIR/include/generated/utsrelease.h"
+    if [[ -f "$uts_h" ]]; then
+        sed -i "s|^#define UTS_RELEASE .*|#define UTS_RELEASE \"$MILKSU_KMOD_UTS_RELEASE\"|" "$uts_h"
+        printf "vermagic: UTS_RELEASE    -> %s\n" "$(sed -n 's/^#define UTS_RELEASE //p' "$uts_h")"
+    else
+        printf "WARN: %s missing, cannot override UTS_RELEASE\n" "$uts_h"
+    fi
 fi
 if [[ -n "${MILKSU_KMOD_ARCH_VERMAGIC:-}" ]]; then
+    # On arm64 6.1 there is no MODULE_ARCH_VERMAGIC in asm/module.h, so the
+    # generic fallback in include/linux/vermagic.h is the only place to patch.
     kmod_h="$KDIR/arch/arm64/include/asm/module.h"
-    if [[ -f "$kmod_h" ]] && grep -q "^#define MODULE_ARCH_VERMAGIC" "$kmod_h"; then
-        sed -i "s|^#define MODULE_ARCH_VERMAGIC.*|#define MODULE_ARCH_VERMAGIC \"$MILKSU_KMOD_ARCH_VERMAGIC\"|" "$kmod_h"
-        printf "vermagic: ARCH_VERMAGIC -> %s\n" "$MILKSU_KMOD_ARCH_VERMAGIC"
+    vm_h="$KDIR/include/linux/vermagic.h"
+    if [[ -f "$kmod_h" ]] && grep -q "MODULE_ARCH_VERMAGIC" "$kmod_h"; then
+        sed -i "s|.*MODULE_ARCH_VERMAGIC.*|#define MODULE_ARCH_VERMAGIC \"$MILKSU_KMOD_ARCH_VERMAGIC\"|" "$kmod_h"
+        printf "vermagic: asm/module.h   -> %s\n" "$MILKSU_KMOD_ARCH_VERMAGIC"
+    fi
+    if [[ -f "$vm_h" ]]; then
+        if grep -q '^#define MODULE_ARCH_VERMAGIC' "$vm_h"; then
+            sed -i "s|^#define MODULE_ARCH_VERMAGIC.*|#define MODULE_ARCH_VERMAGIC \"$MILKSU_KMOD_ARCH_VERMAGIC\"|" "$vm_h"
+        else
+            sed -i "/#ifndef MODULE_ARCH_VERMAGIC/a #define MODULE_ARCH_VERMAGIC \"$MILKSU_KMOD_ARCH_VERMAGIC\"" "$vm_h"
+        fi
+        printf "vermagic: linux/vermagic.h -> %s\n" "$MILKSU_KMOD_ARCH_VERMAGIC"
     else
-        printf "WARN: no MODULE_ARCH_VERMAGIC in %s, arch vermagic left as is\n" "$kmod_h"
+        printf "WARN: %s missing, cannot override MODULE_ARCH_VERMAGIC\n" "$vm_h"
     fi
 fi
 # -----------------------------------------------------------------------
@@ -93,7 +114,9 @@ if [[ "$MILKSU_MODE" != susfs ]]; then
         KSU_EXPECTED_HASH="$KSU_EXPECTED_HASH"
     cp kernelsu.ko "/artifacts/${MILKSU_KMI}_kernelsu.ko"
     llvm-strip -d "/artifacts/${MILKSU_KMI}_kernelsu.ko"
-    readelf -h "/artifacts/${MILKSU_KMI}_kernelsu.ko"
+    printf "built vermagic: "
+    readelf -p .modinfo "/artifacts/${MILKSU_KMI}_kernelsu.ko" 2>/dev/null | sed -n 's/.*vermagic=//p' | head -1
+    readelf -h "/artifacts/${MILKSU_KMI}_kernelsu.ko" >/dev/null
 fi
 if [[ "$MILKSU_MODE" == both || "$MILKSU_MODE" == susfs ]]; then
     test -f susfs/Makefile
@@ -110,7 +133,9 @@ if [[ "$MILKSU_MODE" == both || "$MILKSU_MODE" == susfs ]]; then
     fi
     cp susfs/susfs_guard_lkm.ko "/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko"
     llvm-strip -d "/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko"
-    readelf -h "/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko"
+    printf "built vermagic: "
+    readelf -p .modinfo "/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko" 2>/dev/null | sed -n 's/.*vermagic=//p' | head -1
+    readelf -h "/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko" >/dev/null
 fi
 '
 milksu_run docker run --rm --network host \
