@@ -114,6 +114,18 @@ jobs:
             sudo --preserve-env=MILKSU_SIGNING_PROFILE,MILKSU_REQUIRE_RELEASE_SIGNING env MILKSU_ROOT="$GITHUB_WORKSPACE" MILKSU_CACHE="$MILKSU_CACHE" MILKSU_ABIS="$MILKSU_ABIS" MILKSU_REQUIRE_FULL_MATRIX="$MILKSU_REQUIRE_FULL_MATRIX" bash tools/build-release.sh "$stage"
           done
 
+      - name: Make build products readable by the runner user
+        # Every build-*.sh invocation runs under sudo, so the artifacts are
+        # owned by root while actions/upload-artifact reads them as the runner
+        # user and aborts with "EACCES: permission denied" mid-zip.
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d out ]]; then
+            sudo chown -R "$(id -u):$(id -g)" out
+            sudo chmod -R u+rwX out
+          fi
+
       - name: Upload MilkSU build products
         # Upload whatever was produced even when a later stage fails, so a
         # successfully built kernel module is never discarded because the
