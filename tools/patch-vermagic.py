@@ -50,8 +50,8 @@ def section_name(data, info, name_off):
 
 def main():
     if len(sys.argv) != 4:
-        raise SystemExit('usage: patch_vermagic.py <in.ko> <out.ko> "<new vermagic>"')
-    src, dst, new_vm = sys.argv[1], sys.argv[2], sys.argv[3]
+        raise SystemExit('usage: patch_vermagic.py <in.ko> <out.ko> "<arch vermagic>"')
+    src, dst, new_arch = sys.argv[1], sys.argv[2], sys.argv[3]
 
     data = bytearray(open(src, "rb").read())
     info = parse(data)
@@ -69,6 +69,22 @@ def main():
     off, size = shdr[4], shdr[5]
 
     entries = [e for e in data[off:off + size].split(b"\x00") if e]
+
+    # Only the trailing arch segment is replaced. The release string and the
+    # SMP/preempt/mod_unload/modversions flags produced by the DDK must stay:
+    # they describe the module ABI the vendor kernel actually expects.
+    old_vm = None
+    for e in entries:
+        if e.startswith(b"vermagic="):
+            old_vm = e[len(b"vermagic="):].decode("latin1")
+            break
+
+    if old_vm:
+        head, sep, tail = old_vm.rpartition(" ")
+        new_vm = (head + " " + new_arch) if sep else new_arch
+    else:
+        new_vm = new_arch
+
     out_entries = []
     replaced = False
     for e in entries:
@@ -102,10 +118,9 @@ def main():
     open(dst, "wb").write(data)
 
     print("section      :", f".modinfo (index {idx})")
-    print("old offset   :", off, "size", size)
-    print("new offset   :", new_off, "size", len(blob))
-    print("entries      :", len(out_entries))
-    print("vermagic     :", new_vm)
+    print("old vermagic :", old_vm if old_vm else "<none>")
+    print("new vermagic :", new_vm)
+    print("arch segment :", new_arch)
     print("delta bytes  :", len(data) - len(open(src, "rb").read()))
 
 
