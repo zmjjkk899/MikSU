@@ -115,6 +115,10 @@ jobs:
           done
 
       - name: Upload MilkSU build products
+        # Upload whatever was produced even when a later stage fails, so a
+        # successfully built kernel module is never discarded because the
+        # Manager APK (Gradle) stage broke.
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: MilkSU-universal
@@ -128,7 +132,7 @@ jobs:
             out/tools/ksud
             out/manifests/**
             out/toolchain/**
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Upload build logs
         if: always()
