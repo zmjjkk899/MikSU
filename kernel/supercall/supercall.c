@@ -118,6 +118,56 @@ static void ksu_install_fd_tw_func(struct callback_head *cb)
     module_put(THIS_MODULE);
 }
 
+/*
+ * Async variant for callers that run in atomic context - specifically the
+ * setresuid sys_enter tracepoint hook. ksu_install_fd() allocates with
+ * GFP_KERNEL and calls anon_inode_getfile(), both of which may sleep, so it
+ * must never be invoked from a preempt-disabled hook. Queue the install on
+ * task_work and let it run on the way back to user mode.
+ */
+static void ksu_install_fd_tw_func_noreply(struct callback_head *cb)
+{
+    struct ksu_install_fd_tw *tw = container_of(cb, struct ksu_install_fd_tw, cb);
+    int fd = ksu_install_fd();
+
+    if (fd < 0)
+        pr_warn("[%d] install ksu fd (async) failed: %d\n", current->pid, fd);
+    else
+        pr_info("[%d] install ksu fd (async): %d\n", current->pid, fd);
+
+    kfree(tw);
+    module_put(THIS_MODULE);
+}
+
+int ksu_install_fd_async(void)
+{
+    struct ksu_install_fd_tw *tw;
+
+    if (!allowed_for_driver())
+        return -EPERM;
+
+    if (!try_module_get(THIS_MODULE))
+        return -ENODEV;
+
+    tw = kzalloc(sizeof(*tw), GFP_ATOMIC);
+    if (!tw) {
+        module_put(THIS_MODULE);
+        return -ENOMEM;
+    }
+
+    tw->outp = NULL;
+    tw->cb.func = ksu_install_fd_tw_func_noreply;
+
+    if (task_work_add(current, &tw->cb, TWA_RESUME)) {
+        kfree(tw);
+        module_put(THIS_MODULE);
+        pr_warn("install fd async: task_work_add failed\n");
+        return -EAGAIN;
+    }
+
+    return 0;
+}
+
 static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
 {
     struct pt_regs *real_regs = PT_REAL_REGS(regs);
