@@ -85,24 +85,53 @@ if [[ -n "${MILKSU_KMOD_UTS_RELEASE:-}" ]]; then
     fi
 fi
 if [[ -n "${MILKSU_KMOD_ARCH_VERMAGIC:-}" ]]; then
-    # On arm64 6.1 there is no MODULE_ARCH_VERMAGIC in asm/module.h, so the
-    # generic fallback in include/linux/vermagic.h is the only place to patch.
+    # The DDK ships a trimmed KDIR whose include/linux/vermagic.h is absent, so
+    # MODULE_ARCH_VERMAGIC cannot be patched in place and modpost keeps the
+    # generic arch string it was built with. Recreate the header with the
+    # vendor value and let make rebuild modpost against it.
     kmod_h="$KDIR/arch/arm64/include/asm/module.h"
     vm_h="$KDIR/include/linux/vermagic.h"
     if [[ -f "$kmod_h" ]] && grep -q "MODULE_ARCH_VERMAGIC" "$kmod_h"; then
         sed -i "s|.*MODULE_ARCH_VERMAGIC.*|#define MODULE_ARCH_VERMAGIC \"$MILKSU_KMOD_ARCH_VERMAGIC\"|" "$kmod_h"
         printf "vermagic: asm/module.h   -> %s\n" "$MILKSU_KMOD_ARCH_VERMAGIC"
     fi
-    if [[ -f "$vm_h" ]]; then
-        if grep -q "MODULE_ARCH_VERMAGIC" "$vm_h"; then
-            sed -i "s|#define MODULE_ARCH_VERMAGIC.*|#define MODULE_ARCH_VERMAGIC \"$MILKSU_KMOD_ARCH_VERMAGIC\"|" "$vm_h"
-        else
-            printf "WARN: no MODULE_ARCH_VERMAGIC in %s\n" "$vm_h"
-        fi
-        printf "vermagic: linux/vermagic.h -> %s\n" "$MILKSU_KMOD_ARCH_VERMAGIC"
+    if [[ ! -f "$vm_h" ]]; then
+        mkdir -p "$KDIR/include/linux"
+        printf "%s\n" \
+            "#ifndef _LINUX_VERMAGIC_H" \
+            "#define _LINUX_VERMAGIC_H" \
+            "#include <generated/utsrelease.h>" \
+            "#ifdef CONFIG_SMP" \
+            "#define MODULE_VERMAGIC_SMP \"SMP \"" \
+            "#else" \
+            "#define MODULE_VERMAGIC_SMP \"\"" \
+            "#endif" \
+            "#if defined(CONFIG_PREEMPT_BUILD) || defined(CONFIG_PREEMPT)" \
+            "#define MODULE_VERMAGIC_PREEMPT \"preempt \"" \
+            "#elif defined(CONFIG_PREEMPT_RT)" \
+            "#define MODULE_VERMAGIC_PREEMPT \"preempt_rt \"" \
+            "#else" \
+            "#define MODULE_VERMAGIC_PREEMPT \"\"" \
+            "#endif" \
+            "#ifdef CONFIG_MODULE_UNLOAD" \
+            "#define MODULE_VERMAGIC_MODULE_UNLOAD \"mod_unload \"" \
+            "#else" \
+            "#define MODULE_VERMAGIC_MODULE_UNLOAD \"\"" \
+            "#endif" \
+            "#ifdef CONFIG_MODVERSIONS" \
+            "#define MODULE_VERMAGIC_MODVERSIONS \"modversions \"" \
+            "#else" \
+            "#define MODULE_VERMAGIC_MODVERSIONS \"\"" \
+            "#endif" \
+            "#define MODULE_ARCH_VERMAGIC \"$MILKSU_KMOD_ARCH_VERMAGIC\"" \
+            "#define VERMAGIC_STRING UTS_RELEASE \" \" MODULE_VERMAGIC_SMP MODULE_VERMAGIC_PREEMPT MODULE_VERMAGIC_MODULE_UNLOAD MODULE_VERMAGIC_MODVERSIONS MODULE_ARCH_VERMAGIC" \
+            "#endif" > "$vm_h"
+        printf "vermagic: recreated %s\n" "$vm_h"
+        make -C "$KDIR" scripts >/dev/null 2>&1 || printf "WARN: make scripts failed, modpost may stay generic\n"
     else
-        printf "WARN: %s missing\n" "$vm_h"
+        sed -i "s|.*MODULE_ARCH_VERMAGIC.*|#define MODULE_ARCH_VERMAGIC \"$MILKSU_KMOD_ARCH_VERMAGIC\"|" "$vm_h"
     fi
+    printf "vermagic: ARCH_VERMAGIC -> %s\n" "$MILKSU_KMOD_ARCH_VERMAGIC"
 fi
 # -----------------------------------------------------------------------
 
