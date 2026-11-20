@@ -63,6 +63,29 @@ set -Eeuo pipefail
 git config --global --add safe.directory /source
 cd /source/kernel
 printf "DDK KDIR=%s ARCH=%s\n" "$KDIR" "$ARCH"
+
+# --- vermagic override -------------------------------------------------
+# A vendor kernel reports a custom release string and/or a custom
+# MODULE_ARCH_VERMAGIC (for example "vivo aarch64"). The stock DDK carries
+# the generic values, so insmod on such a device rejects the module with a
+# vermagic mismatch. Symbol CRCs are not a constraint here: these modules
+# resolve kernel symbols at runtime through kallsyms_lookup_name and ship an
+# empty __versions section, so overriding the two vermagic strings is enough.
+if [[ -n "${MILKSU_KMOD_UTS_RELEASE:-}" ]]; then
+    printf "%s" "$MILKSU_KMOD_UTS_RELEASE" > "$KDIR/include/config/kernel.release"
+    printf "vermagic: UTS_RELEASE    -> %s\n" "$(cat "$KDIR/include/config/kernel.release")"
+fi
+if [[ -n "${MILKSU_KMOD_ARCH_VERMAGIC:-}" ]]; then
+    kmod_h="$KDIR/arch/arm64/include/asm/module.h"
+    if [[ -f "$kmod_h" ]] && grep -q "^#define MODULE_ARCH_VERMAGIC" "$kmod_h"; then
+        sed -i "s|^#define MODULE_ARCH_VERMAGIC.*|#define MODULE_ARCH_VERMAGIC \"$MILKSU_KMOD_ARCH_VERMAGIC\"|" "$kmod_h"
+        printf "vermagic: ARCH_VERMAGIC -> %s\n" "$MILKSU_KMOD_ARCH_VERMAGIC"
+    else
+        printf "WARN: no MODULE_ARCH_VERMAGIC in %s, arch vermagic left as is\n" "$kmod_h"
+    fi
+fi
+# -----------------------------------------------------------------------
+
 if [[ "$MILKSU_MODE" != susfs ]]; then
     make -C "$KDIR" M=/source/kernel ARCH=arm64 CONFIG_ARM64=y CONFIG_KSU=m clean
     CONFIG_KSU=m CC=clang make -j"$MILKSU_JOBS" \
@@ -99,7 +122,10 @@ milksu_run docker run --rm --network host \
     -e "MILKSU_MODE=$mode" -e "MILKSU_KMI=$kmi" -e "MILKSU_JOBS=$MILKSU_JOBS" \
     -e "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" -e KBUILD_BUILD_USER=milksu -e KBUILD_BUILD_HOST=milksu \
     -e "KSU_PACKAGE_NAME=$package" -e "KSU_EXPECTED_SIZE=$cert_size" \
-    -e "KSU_EXPECTED_HASH=$cert_hash" "$image" bash -c "$container_script"
+    -e "KSU_EXPECTED_HASH=$cert_hash" \
+    -e "MILKSU_KMOD_UTS_RELEASE=${MILKSU_KMOD_UTS_RELEASE:-}" \
+    -e "MILKSU_KMOD_ARCH_VERMAGIC=${MILKSU_KMOD_ARCH_VERMAGIC:-}" \
+    "$image" bash -c "$container_script"
 mkdir -p "$MILKSU_OUT/manifests"
 cp "$work/source.sha256" "$MILKSU_OUT/manifests/lkm-$kmi-$mode-source.sha256"
 python3 - "$destination" "$kmi" "$mode" "$metadata" "$image" "$MILKSU_OUT/manifests" "$work/version.properties" <<'PY'
