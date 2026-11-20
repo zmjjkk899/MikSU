@@ -147,7 +147,7 @@ if [[ "$MILKSU_MODE" != susfs ]]; then
     llvm-strip -d "/artifacts/${MILKSU_KMI}_kernelsu.ko"
     if [[ -n "${MILKSU_KMOD_UTS_RELEASE:-}" && -n "${MILKSU_KMOD_ARCH_VERMAGIC:-}" ]]; then
         tgt="/artifacts/${MILKSU_KMI}_kernelsu.ko"
-        python3 /source/patch-vermagic.py "$tgt" "$tgt.patched" "$MILKSU_KMOD_UTS_RELEASE $MILKSU_KMOD_ARCH_VERMAGIC" 2>&1 | sed "s/^/  /" || true
+        python3 /source/patch-vermagic.py "$tgt" "$tgt.patched" "$MILKSU_KMOD_ARCH_VERMAGIC" 2>&1 | sed "s/^/  /" || true
         [[ -s "$tgt.patched" ]] && mv "$tgt.patched" "$tgt"
     fi
     printf "built vermagic:\n"
@@ -171,7 +171,7 @@ if [[ "$MILKSU_MODE" == both || "$MILKSU_MODE" == susfs ]]; then
     llvm-strip -d "/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko"
     if [[ -n "${MILKSU_KMOD_UTS_RELEASE:-}" && -n "${MILKSU_KMOD_ARCH_VERMAGIC:-}" ]]; then
         tgt="/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko"
-        python3 /source/patch-vermagic.py "$tgt" "$tgt.patched" "$MILKSU_KMOD_UTS_RELEASE $MILKSU_KMOD_ARCH_VERMAGIC" 2>&1 | sed "s/^/  /" || true
+        python3 /source/patch-vermagic.py "$tgt" "$tgt.patched" "$MILKSU_KMOD_ARCH_VERMAGIC" 2>&1 | sed "s/^/  /" || true
         [[ -s "$tgt.patched" ]] && mv "$tgt.patched" "$tgt"
     fi
     printf "built vermagic:\n"
