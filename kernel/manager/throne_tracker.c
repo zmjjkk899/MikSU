@@ -82,7 +82,7 @@ static bool maybe_manager_apk_dir(const char *path, const char *package)
         return false;
     }
 
-    // pkg is `<real package>`
+    // pkg is the real package name
     return !strcmp(pkg, package);
 }
 
@@ -347,23 +347,44 @@ int track_throne(bool prune_only)
             goto out;
         }
 
-        char *tmp = buf;
-        const char *delim = " ";
-        char *package = strsep(&tmp, delim);
-        char *uid = strsep(&tmp, delim);
-        if (!uid || !package) {
+        /*
+         * packages.list rows are "name uid debuggable dataDir seinfo gids".
+         * strsep() emits an empty token for every extra delimiter, so a row
+         * with an empty dataDir (seen on several Android 15/16 vendor images)
+         * used to shift the uid field and abort the whole scan with
+         * "uid parse err" - which meant the manager was never recognised after
+         * boot. Split on whitespace runs, and skip a malformed row instead of
+         * giving up on the whole file.
+         */
+        char *p = buf;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        char *package = p;
+        while (*p && *p != ' ' && *p != '\t')
+            p++;
+        if (*p)
+            *p++ = '\0';
+        while (*p == ' ' || *p == '\t')
+            p++;
+        char *uid = p;
+        while (*p && *p != ' ' && *p != '\t')
+            p++;
+        if (*p)
+            *p = '\0';
+
+        if (!*package || !*uid) {
             kfree(data);
-            pr_err("update_uid: package or uid is NULL!\n");
-            result = -EINVAL;
-            break;
+            pr_err("update_uid: empty field, skip row\n");
+            line_start = pos;
+            continue;
         }
 
         u32 res;
         if (kstrtou32(uid, 10, &res)) {
             kfree(data);
-            pr_err("update_uid: uid parse err\n");
-            result = -EINVAL;
-            break;
+            pr_err("update_uid: uid parse err (pkg=%s uid='%s'), skip row\n", package, uid);
+            line_start = pos;
+            continue;
         }
         data->uid = res;
         strscpy(data->package, package, sizeof(data->package));
