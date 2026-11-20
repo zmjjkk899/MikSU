@@ -122,6 +122,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: MilkSU-universal
+          # zipping the multi-megabyte kernel modules with the default deflate
+          # level aborts the upload with a DeflateCRC32Stream error, so store
+          # the files uncompressed (they are already small and incompressible).
+          compression-level: 0
           path: |
             out/manager/*.apk
             out/aarch64/*.ko
