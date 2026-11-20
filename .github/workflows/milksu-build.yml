@@ -127,15 +127,8 @@ jobs:
           # the files uncompressed (they are already small and incompressible).
           compression-level: 0
           path: |
-            out/manager/*.apk
             out/aarch64/*.ko
-            out/ksuinit/**
-            out/ksud/**
-            out/kpatch/**
-            out/tools/kptools
-            out/tools/ksud
             out/manifests/**
-            out/toolchain/**
           if-no-files-found: warn
 
       - name: Upload build logs
