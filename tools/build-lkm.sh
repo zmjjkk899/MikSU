@@ -45,6 +45,9 @@ milksu_run rsync -a --delete --exclude='*.o' --exclude='*.ko' --exclude='*.cmd' 
     --exclude=modules.order --exclude=check_symbol --exclude=out \
     "$source_root/kernel/" "$work/kernel/"
 milksu_run rsync -a --delete "$source_root/uapi/" "$work/uapi/"
+# Ship the vermagic patcher alongside the sources so the container can call it
+# after linking (see the "patch-vermagic.py" step below).
+cp "$MILKSU_ROOT/tools/patch-vermagic.py" "$work/patch-vermagic.py"
 if [[ "$mode" != baseline ]]; then
     [[ -f "$source_root/version.properties" ]] ||
         milksu_die "Kernel source snapshot has no shared release version; freeze it again."
@@ -142,6 +145,11 @@ if [[ "$MILKSU_MODE" != susfs ]]; then
         KSU_EXPECTED_HASH="$KSU_EXPECTED_HASH"
     cp kernelsu.ko "/artifacts/${MILKSU_KMI}_kernelsu.ko"
     llvm-strip -d "/artifacts/${MILKSU_KMI}_kernelsu.ko"
+    if [[ -n "${MILKSU_KMOD_UTS_RELEASE:-}" && -n "${MILKSU_KMOD_ARCH_VERMAGIC:-}" ]]; then
+        tgt="/artifacts/${MILKSU_KMI}_kernelsu.ko"
+        python3 /source/patch-vermagic.py "$tgt" "$tgt.patched" "$MILKSU_KMOD_UTS_RELEASE $MILKSU_KMOD_ARCH_VERMAGIC" 2>&1 | sed "s/^/  /" || true
+        [[ -s "$tgt.patched" ]] && mv "$tgt.patched" "$tgt"
+    fi
     printf "built vermagic:\n"
     readelf -p .modinfo "/artifacts/${MILKSU_KMI}_kernelsu.ko" 2>/dev/null | grep vermagic || true
     readelf -h "/artifacts/${MILKSU_KMI}_kernelsu.ko" >/dev/null
@@ -161,6 +169,11 @@ if [[ "$MILKSU_MODE" == both || "$MILKSU_MODE" == susfs ]]; then
     fi
     cp susfs/susfs_guard_lkm.ko "/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko"
     llvm-strip -d "/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko"
+    if [[ -n "${MILKSU_KMOD_UTS_RELEASE:-}" && -n "${MILKSU_KMOD_ARCH_VERMAGIC:-}" ]]; then
+        tgt="/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko"
+        python3 /source/patch-vermagic.py "$tgt" "$tgt.patched" "$MILKSU_KMOD_UTS_RELEASE $MILKSU_KMOD_ARCH_VERMAGIC" 2>&1 | sed "s/^/  /" || true
+        [[ -s "$tgt.patched" ]] && mv "$tgt.patched" "$tgt"
+    fi
     printf "built vermagic:\n"
     readelf -p .modinfo "/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko" 2>/dev/null | grep vermagic || true
     readelf -h "/artifacts/${MILKSU_KMI}_susfs_guard_lkm.ko" >/dev/null
