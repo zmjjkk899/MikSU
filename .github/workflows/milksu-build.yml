@@ -27,8 +27,10 @@ jobs:
       MILKSU_JOBS: 2
       MILKSU_ABIS: 'arm64-v8a x86_64'
       MILKSU_DDK_RELEASE: '20260828'
-      MILKSU_SIGNING_PROFILE: release
-      MILKSU_REQUIRE_RELEASE_SIGNING: '1'
+      # A fork without the upstream release keystore builds a development-signed
+      # Manager. The kernel module and its vermagic are unaffected by this.
+      MILKSU_SIGNING_PROFILE: development
+      MILKSU_REQUIRE_RELEASE_SIGNING: '0'
       # Override the DDK's generic vermagic with the target device's values.
       # Leave empty to keep the DDK defaults. Passed only to the
       # android14-6.1 build; other KMIs must keep their own release string.
@@ -64,7 +66,8 @@ jobs:
           key = os.environ.get("MILKSU_RELEASE_KEYSTORE_B64", "")
           password = os.environ.get("MILKSU_RELEASE_KEYSTORE_PASSWORD", "")
           if not key or not password:
-              raise SystemExit("Configure the two MilkSU release signing secrets before running this workflow")
+              print("no MilkSU release signing secrets; using the development signing profile")
+              sys.exit(0)
           private = pathlib.Path(sys.argv[1])
           private.mkdir(parents=True, mode=0o700, exist_ok=True)
           private.chmod(0o700)
